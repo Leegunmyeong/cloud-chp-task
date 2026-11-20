@@ -14,8 +14,9 @@ AWS 클라우드 환경에서 Spring Boot 기반의 팀원 정보 등록 및 조
 - **Logging** : SLF4J
 - **Monitoring** : Spring Boot Actuator
 - **Build Tool** : Gradle
-- **Infrastructure** : AWS VPC, EC2, RDS
+- **Infrastructure** : AWS VPC, EC2, RDS, S3
 - **Version Control** : Git, GitHub
+- **AWS Integration** : Spring Cloud AWS
 - **Configuration Management** : AWS Parameter Store
 - **API Test** : Postman
 - **Access Management** : AWS IAM
@@ -178,6 +179,86 @@ GET /actuator/info
 - Public IPv4: `현재 EC2 퍼블릭 IP`
 - Health: `http://EC2퍼블릭IP:8080/actuator/health`
 - Info: `http://EC2퍼블릭IP:8080/actuator/info`
+
+---
+
+## 6. LV 3 - AWS S3 연동 환경 구축
+
+### 6-1. S3 Bucket 구성
+
+- AWS 서울 리전(ap-northeast-2)에 S3 Bucket 생성
+- 모든 퍼블릭 액세스 차단 설정
+- 프로필 이미지 파일 저장 공간 구성
+
+### 6-2. IAM Policy 및 Role 설정
+
+최소 권한 원칙을 적용하여 S3 접근에 필요한 권한만 부여하였다.
+
+| 권한 | 용도 |
+| --- | --- |
+| s3:PutObject | 파일 업로드 |
+| s3:GetObject | 파일 조회 및 다운로드 |
+
+- 고객 관리형 정책(S3CloudTaskPolicy) 생성
+- 지정된 S3 버킷에 대한 접근 권한 제한
+- 기존 EC2 IAM Role 재사용
+- 기존 AmazonSSMReadOnlyAccess 정책 유지
+- 기존 IAM Role에 S3CloudTaskPolicy 추가
+
+### 6-3. 로컬 개발용 IAM User 설정
+
+배포 전 로컬 환경에서 S3에 접근할 수 있도록
+개발 전용 IAM User를 생성하였다.
+
+- 로컬 개발용 IAM User 생성
+- S3CloudTaskPolicy 연결
+- 로컬 개발용 Access Key 발급
+- IntelliJ Environment Variables를 활용한 인증 정보 관리
+- Java 코드 및 YAML 파일에 실제 Access Key 미포함
+
+#### 환경별 AWS 인증 방식
+
+| 구분 | Local | Prod |
+| --- | --- | --- |
+| 인증 방식 | IAM User | IAM Role |
+| 인증 정보 | 환경변수 | 임시 인증 정보 자동 발급 |
+| S3 접근 정책 | S3CloudTaskPolicy | S3CloudTaskPolicy |
+| Parameter Store | 비활성화 | 활성화 |
+
+### 6-4. Spring Cloud AWS 의존성 관리
+
+BOM(Bill of Materials)을 적용하여 Spring Cloud AWS 관련
+라이브러리의 버전을 통합 관리하였다.
+
+- Spring Cloud AWS BOM 적용
+- 기존 Parameter Store 의존성 버전 통합 관리
+- Spring Cloud AWS S3 Starter 의존성 추가
+
+### 6-5. 실행 환경 설정
+
+기존 Local / Prod 환경 분리 구조를 유지하면서
+S3 연동에 필요한 YAML 설정을 추가하였다.
+
+| 설정 항목 | Local | Prod |
+| --- | --- | --- |
+| Database | H2 | RDS MySQL |
+| ddl-auto | create-drop | none |
+| Server Port | 8000 | 8080 |
+| AWS Region | ap-northeast-2 | ap-northeast-2 |
+| S3 Bucket | 설정 완료 | 설정 완료 |
+| 최대 파일 크기 | 10MB | 10MB |
+| Parameter Store | 비활성화 | 활성화 |
+| AWS 인증 | 환경변수 | IAM Role |
+
+### 6-6. 보안 설정
+
+- S3 모든 퍼블릭 액세스 차단
+- IAM 최소 권한 원칙 적용
+- 개발 환경과 운영 환경의 인증 방식 분리
+- Access Key 및 Secret Access Key 하드코딩 방지
+- 환경변수를 활용한 로컬 인증 정보 관리
+- 운영 환경에서 IAM Role을 활용한 AWS 인증
+- 민감한 설정 파일 GitHub 업로드 제외
 
 
 
