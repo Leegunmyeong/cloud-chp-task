@@ -71,8 +71,8 @@ AWS 클라우드 환경에서 Spring Boot 기반의 팀원 정보 등록 및 조
 
 ### 4-6. EC2 접속 정보
 
-- Public IP: `3.34.132.101`
-- Health Check: `http://3.34.132.101:8080/actuator/health`
+- Public IP: `{퍼블릭 IPv4 주소}`
+- Health Check: `http://{퍼블릭 IPv4 주소}:8080/actuator/health`
 
 ### 4-7. Health Check 결과
 
@@ -135,7 +135,7 @@ DB 접속 정보와 팀 이름을 외부 설정값으로 관리한다.
 | 구분 | Local | Prod |
 | --- | --- | --- |
 | 데이터베이스 | H2 | RDS MySQL |
-| ddl-auto | create-drop | validate |
+| ddl-auto | create-drop | none |
 | Parameter Store | 비활성화 | 활성화 |
 
 - 운영 환경의 데이터베이스 스키마 수동 생성
@@ -250,6 +250,17 @@ S3 연동에 필요한 YAML 설정을 추가하였다.
 | Parameter Store | 비활성화 | 활성화 |
 | AWS 인증 | 환경변수 | IAM Role |
 
+#### Parameter Store 환경별 설정
+
+- Local: H2 사용, Parameter Store 비활성화
+- Prod: RDS MySQL 사용, Parameter Store 활성화
+
+운영 환경에서 `parameterstore.enabled: false`로 설정되어
+DB_URL이 실제 JDBC 주소로 치환되지 않는 문제가 발생했습니다.
+
+운영 환경에서는 Parameter Store를 활성화하여
+DB 접속 정보를 정상적으로 가져오도록 설정했습니다.
+
 ### 6-6. 보안 설정
 
 - S3 모든 퍼블릭 액세스 차단
@@ -259,6 +270,94 @@ S3 연동에 필요한 YAML 설정을 추가하였다.
 - 환경변수를 활용한 로컬 인증 정보 관리
 - 운영 환경에서 IAM Role을 활용한 AWS 인증
 - 민감한 설정 파일 GitHub 업로드 제외
+
+
+### 6-7. 프로필 이미지 기능 구현
+
+기존 3계층 구조(Controller → Service → Repository)를 유지하면서 S3 기반 이미지 업로드 및 조회 기능을 구현하였다.
+
+#### 주요 변경 사항
+
+| 파일 | 변경 내용 |
+| --- | --- |
+| Member.java | profileImageUrl 필드 및 변경 메서드 추가 |
+| S3Controller.java | 이미지 업로드 및 조회 API 구현 |
+| S3Service.java | S3 업로드, DB 저장 및 Presigned URL 생성 |
+| FileUploadResponse.java | 업로드 응답 DTO |
+| FileDownloadUrlResponse.java | 조회 응답 DTO |
+
+- 실제 이미지 파일은 S3에 저장
+- 이미지 URL은 RDS에 저장
+- 이미지 조회 시 Presigned URL을 새로 발급
+
+### 6-8. API 및 테스트 결과
+
+| 기능 | Method | Endpoint | 결과 |
+| --- | --- | --- | --- |
+| 프로필 이미지 업로드 | POST | /api/members/{id}/profile-image | 성공 |
+| 프로필 이미지 조회 | GET | /api/members/{id}/profile-image | 성공 |
+
+#### 이미지 업로드
+
+- 요청 형식: `multipart/form-data`
+- 요청 데이터: `MultipartFile file`
+- S3 업로드 후 DB에 이미지 주소 저장
+
+#### 이미지 조회
+
+- 회원 ID로 이미지 주소 조회
+- S3 객체 Key를 사용하여 Presigned URL 생성
+- 생성한 URL을 클라이언트에 반환
+
+### 6-9. RDS 테이블 변경
+
+프로필 이미지 URL을 저장하기 위해 기존 members 테이블에 컬럼을 추가하였다.
+
+```sql
+ALTER TABLE members
+ADD COLUMN profile_image_url VARCHAR(2048) NULL;
+```
+
+| 컬럼명 | 데이터 타입 | NULL 허용 |
+| --- | --- | --- |
+| profile_image_url | VARCHAR(2048) | YES |
+
+- 프로필 이미지가 없는 회원도 존재하므로 NULL 허용
+- 이미지 업로드 후 DB 저장 성공 확인
+
+### 6-10. Presigned URL 발급 및 접근 검증
+
+S3 버킷의 퍼블릭 액세스를 차단하고, Presigned URL을 통해 이미지를 조회하도록 구현하였다.
+
+#### 유효기간 설정
+
+```java
+private static final Duration EXPIRATION =
+        Duration.ofDays(7);
+```
+
+#### 발급 결과
+
+| 항목 | 결과 |
+| --- | --- |
+| 실행 환경 | EC2 (prod) |
+| 인증 방식 | IAM Role |
+| API 응답 | 200 OK |
+| 발급 시각 (KST) | 2026-11-23 14:35:07 |
+| X-Amz-Expires | 604800초 |
+| 설정 유효기간 | 7일 |
+| 설정상 만료 시각 (KST) | 2026-11-30 14:35:07 |
+| 이미지 접근 | 성공 |
+
+#### ① Presigned URL 발급 성공
+
+![Presigned URL 발급 성공](images/lv3-ec2-get.png)
+
+#### ② 발급받은 URL로 이미지 접근 성공
+
+![Presigned URL 이미지 접근 성공 이미지](images/lv3-ec2-image-access.png)
+
+> EC2 IAM Role의 임시 인증 정보가 먼저 만료되면 설정된 7일보다 일찍 URL 접근이 불가능할 수 있다. 따라서 과제 요구사항에 따라 실제 이미지 접근 성공 화면을 첨부하였다.
 
 
 
