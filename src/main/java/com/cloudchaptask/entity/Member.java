@@ -25,11 +25,20 @@ public class Member {
     // 팀원 MBTI
     @Column(name = "member_mbti", nullable = false, length = 4)
     private String memberMBTI;
+    // S3에 저장된 프로필 이미지의 주소
+    @Column(name = "profile_image_url", length = 2048)
+    private String profileImageUrl;
+
 
 
     public Member(String memberName, Integer memberAge, String memberMBTI) {
         this.memberName = memberName;
         this.memberAge = memberAge;
         this.memberMBTI = memberMBTI;
+    }
+
+    // 프로필 이미지 업로드 성공 후 주소 변경
+    public void updateProfileImage(String profileImageUrl) {
+        this.profileImageUrl = profileImageUrl;
     }
 }
